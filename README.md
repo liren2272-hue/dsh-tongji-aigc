@@ -8,6 +8,7 @@
 
 | 工具 | 作用 |
 | --- | --- |
+| `tongji_aigc_form` | **（推荐入口）** 弹出参数卡片并阻塞等待用户填写，返回用户选定的参数 |
 | `tongji_aigc_generate` | 生成：文生图 / 图生图 / 文生视频 / 图生视频 / 文生 3D / 图生 3D / 文生音乐 |
 | `tongji_aigc_templates` | 列出可用模板 / 工作流 |
 | `tongji_aigc_task` | 查询单个任务状态并下载产物 |
@@ -15,11 +16,32 @@
 | `tongji_aigc_quote` | 生成前报价（积分 / 费用） |
 | `tongji_aigc_health` | 健康检查 + 登录态 |
 
+## 卡片式参数表单（任务中期暂停，填完才继续）
+
+模型确定「这次要用 AIGC」之后会先调 `tongji_aigc_form`，插件在**当前对话的输入框下方**弹出参数卡片，并**阻塞等待**——此时任务暂停、不消耗 token，等你选完填完点「提交这些参数」，工具才把结果交回模型，模型再继续后续步骤（预估、生成）。这就是「任务中期的选项」那种交互。
+
+卡片把原本要在聊天里用自然语言描述的参数拆成可点选、可填写的分区：
+
+- **生成模式**：7 种模式（文生图 / 图生图 / 文生视频 / 图生视频 / 文生 3D / 图生 3D / 文生音乐）做成卡片组；
+- **模板**：按模式筛出可用模板，卡片带名称与 code；
+- **提示词**：多行输入，带模板默认值占位与字数上限；
+- **模板参数**：按上游 `param_schema` **自动生成**——`select` 变选项芯片、`int`/`float` 变数字输入（可随机）、`text` 变文本框，切模板自动换一套；
+- **参考图**：`i2i` / `i2v` / `i23d` 直接选本地图，上传后显示缩略图；
+- **生成前预估**：点「预估积分」显示这次要花多少积分、大概多久。
+
+### 三条行为约定
+
+1. **每个对话各一张卡片**：卡片注册在会话作用域的 `conversation.composer.dock` 上，按 `sessionId` 隔离——A 对话在等你填写时，B 对话不会出现这张卡，也不会串数据。
+2. **只在需要时才出现**：没有待填写请求时组件返回 `null`，DOM 里什么都没有、不占任何位置；请求一提交就自动消失。
+3. **不填就不会继续**：工具一直阻塞到你提交为止。想放弃就点 × 取消（模型会收到 `cancelled` 并停下来问你），或点 − 收成提示条稍后再填——收成提示条时工具**仍然在等**，不会静默超时。
+
+> 卡片顶部会显示模型给出的一句说明（例如「请先确认这张图的参数」），并按模型给的建议预选模式 / 模板 / 提示词，方便你在此基础上改。
+
 ## 快速开始
 
 ```bash
-# 1. 安装进桌面 profile（装完需重启 DSH）
-dsh plugin --profile desktop add "C:/Users/15940/Documents/dsh-plugins/dsh-tongji-aigc"
+# 1. 安装进桌面 profile（把路径换成你本机的插件目录；装完需重启 DSH）
+dsh plugin --profile desktop add "/path/to/dsh-tongji-aigc"
 ```
 
 1. 重启 DSH，打开 **设置 → 插件 → 同济 AIGC**；
@@ -44,17 +66,18 @@ dsh plugin --profile desktop add "C:/Users/15940/Documents/dsh-plugins/dsh-tongj
 ```
 dsh-tongji-aigc/
 ├── lib/
-│   ├── index.js          # 宿主入口：工具注册 + webServer 端点（含 login-start / auto-login）
+│   ├── index.js          # 宿主入口：工具注册 + webServer 端点（登录 / 模板 / 报价 / 生成 / 轮询 / 预览 / 使用信号）
 │   ├── config.js         # 配置分层解析
 │   ├── token.js          # 令牌读写 / 掩码 / JWT 解析
-│   ├── auto-login.js     # （保留）临时扩展 + 隔离一次性浏览器窗登录（现役为账号密码直登）
+│   ├── activity.js       # AIGC 使用信号（面板据此滑出）
+│   ├── auto-login.js     # （保留）临时扩展 + 隔离一次性浏览器窗登录
 │   ├── log.js
 │   ├── aigc/
 │   │   ├── client.js     # 同济 AIGC REST 客户端
-│   │   ├── generate.js   # 生成主链路（工具与卡片端点共用）
+│   │   ├── generate.js   # 生成主链路（工具与面板端点共用）
 │   │   ├── runner.js     # 任务轮询 + 产物落盘
 │   │   └── tools.js      # 6 个 DSH 工具定义
-│   └── client/index.js   # 设置卡片（状态优先 UI + 全自动登录）
+│   └── client/index.js   # 设置卡片 + 卡片式参数浮层面板
 ├── locale/               # zh / en 文案（meta + 卡片）
 ├── docs/USAGE.md
 ├── cordis.patch.yml
